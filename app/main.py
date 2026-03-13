@@ -1,9 +1,11 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
 from cachetools import TTLCache
 from fastapi import Depends, FastAPI, Query, Request
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
 from app.auth import verify_auth
 from app.config import settings
@@ -16,16 +18,38 @@ from app.opds import (
     build_root_feed,
 )
 from app.paperless_client import PaperlessClient
+from app.thumbnail_cache import ThumbnailCacheManager
+
+logger = logging.getLogger("uvicorn.error")
 
 client: PaperlessClient
+cache_manager: ThumbnailCacheManager
 _response_cache: TTLCache = TTLCache(maxsize=256, ttl=600)
+
+
+def _pregen_done_callback(task: asyncio.Task) -> None:
+    """Log any exception from the background pre-generation task."""
+    if task.cancelled():
+        logger.info("Thumbnail pre-generation was cancelled")
+        return
+    exc = task.exception()
+    if exc:
+        logger.error("Thumbnail pre-generation failed: %s", exc, exc_info=exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global client
+    global client, cache_manager
     client = PaperlessClient()
+    cache_manager = ThumbnailCacheManager(client)
+    pregen_task = None
+    if settings.thumbnail_pregenerate:
+        logger.info("Launching thumbnail pre-generation worker...")
+        pregen_task = asyncio.create_task(cache_manager.pregenerate_all())
+        pregen_task.add_done_callback(_pregen_done_callback)
     yield
+    if pregen_task and not pregen_task.done():
+        pregen_task.cancel()
     await client.close()
 
 
@@ -103,6 +127,7 @@ async def _build_acquisition(
         page=page,
         total_count=total,
         page_size=settings.opds_page_size,
+        include_content=settings.opds_include_content,
     )
     return Response(content=xml, media_type=ACQUISITION_TYPE)
 
@@ -256,6 +281,7 @@ async def custom_field_option_documents(
         page=page,
         total_count=total,
         page_size=settings.opds_page_size,
+        include_content=settings.opds_include_content,
     )
     return Response(content=xml, media_type=ACQUISITION_TYPE)
 
@@ -279,6 +305,7 @@ async def search(request: Request, query: str = Query(""), page: int = Query(1, 
         page=page,
         total_count=total,
         page_size=settings.opds_page_size,
+        include_content=settings.opds_include_content,
     )
     return Response(content=xml, media_type=ACQUISITION_TYPE)
 
@@ -298,13 +325,21 @@ async def download_document(doc_id: int) -> StreamingResponse:
     return StreamingResponse(content=stream, headers=headers)
 
 
-@app.get("/thumb/{doc_id}", dependencies=[Depends(verify_auth)])
-async def thumbnail(doc_id: int) -> Response:
-    data, headers = await client.get_thumbnail(doc_id)
-    return Response(content=data, headers=headers)
+@app.get("/thumb/{doc_id}", dependencies=[Depends(verify_auth)], response_model=None)
+async def thumbnail(doc_id: int):
+    try:
+        path = await cache_manager.ensure_thumb(doc_id)
+        return FileResponse(path, media_type="image/jpeg")
+    except Exception:
+        logger.exception("Failed to generate thumbnail for doc %d", doc_id)
+        return Response(status_code=502, content="Failed to generate thumbnail")
 
 
-@app.get("/preview/{doc_id}", dependencies=[Depends(verify_auth)])
-async def preview(doc_id: int) -> StreamingResponse:
-    stream, headers = await client.stream_preview(doc_id)
-    return StreamingResponse(content=stream, headers=headers)
+@app.get("/preview/{doc_id}", dependencies=[Depends(verify_auth)], response_model=None)
+async def preview(doc_id: int):
+    try:
+        path = await cache_manager.ensure_preview(doc_id)
+        return FileResponse(path, media_type="image/jpeg")
+    except Exception:
+        logger.exception("Failed to generate preview for doc %d", doc_id)
+        return Response(status_code=502, content="Failed to generate preview")

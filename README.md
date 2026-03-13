@@ -8,7 +8,7 @@ Middleware that exposes a [Paperless-ngx](https://docs.paperless-ngx.com/) docum
 - **Browse by** tag, correspondent, document type, or custom select fields
 - **Search** via OpenSearch
 - **Proxied downloads** — readers never need Paperless credentials
-- **Thumbnail caching** — in-memory, 10-minute TTL
+- **Thumbnail & preview caching** — disk-cached JPEG images, pre-generated at startup
 - **Response caching** — all OPDS XML feeds cached 10 minutes
 - **Optional HTTP Basic Auth** for protecting the feed
 - **Config via env vars or `config.json`**
@@ -26,7 +26,12 @@ services:
     environment:
       PAPERLESS_URL: "https://paperless.example.com"
       PAPERLESS_API_KEY: "your-api-key-here"
+    volumes:
+      - thumbnails:/data/thumbnails
     restart: unless-stopped
+
+volumes:
+  thumbnails:
 ```
 
 ```bash
@@ -68,6 +73,14 @@ All settings can be provided via environment variables or a `config.json` file. 
 | `OPDS_USERNAME` | — | *unset* | Enable Basic Auth (both username and password must be set) |
 | `OPDS_PASSWORD` | — | *unset* | Basic Auth password |
 | `CONFIG_PATH` | — | `config.json` | Path to config file |
+| `THUMBNAIL_DIR` | — | `/data/thumbnails` | Directory for cached thumbnail/preview images |
+| `THUMBNAIL_PREGENERATE` | — | `true` | Pre-generate all thumbnails on startup |
+| `THUMB_MAX_SIZE` | — | `300` | Max pixel size (longest side) for thumbnails |
+| `PREVIEW_MAX_SIZE` | — | `1000` | Max pixel size (longest side) for previews |
+| `THUMBNAIL_QUALITY` | — | `85` | JPEG quality (1-100) |
+| `THUMBNAIL_BATCH_SIZE` | — | `50` | Documents per batch during pre-generation |
+| `THUMBNAIL_MAX_RETRIES` | — | `3` | Retries per document on generation failure |
+| `OPDS_INCLUDE_CONTENT` | — | `false` | Include document text snippets in OPDS feed entries |
 
 Example `config.json`:
 
@@ -79,6 +92,19 @@ Example `config.json`:
   }
 }
 ```
+
+## Thumbnail & Preview Caching
+
+Thumbnails and previews are served as JPEG images (not PDFs). On first startup, the app fetches thumbnail/preview data from Paperless-ngx for all documents and caches resized images to disk. This ensures fast image serving for OPDS readers like Panels, KOReader, etc.
+
+- **Thumbnails** (`/thumb/{id}`): Small JPEG (~300px longest side), sourced from Paperless's thumbnail API
+- **Previews** (`/preview/{id}`): Larger JPEG (~1000px longest side), rendered from the first page of the document PDF
+
+Cached images are stored in `THUMBNAIL_DIR` (default `/data/thumbnails`) under `thumb/` and `preview/` subdirectories. Mount this as a Docker volume to persist across container restarts.
+
+Pre-generation runs in the background at startup and processes documents sequentially in batches. If a thumbnail/preview is requested before pre-generation reaches it, it will be generated on demand.
+
+Set `THUMBNAIL_PREGENERATE=false` to disable startup pre-generation (images will only be generated on first request).
 
 ## OPDS Endpoints
 

@@ -135,6 +135,7 @@ def build_acquisition_feed(
     page: int,
     total_count: int,
     page_size: int,
+    include_content: bool = False,
 ) -> str:
     feed = ET.Element(f"{{{ATOM_NS}}}feed")
     _el(feed, "id", f"urn:uuid:paperless-opds-acq-{title.lower().replace(' ', '-')}")
@@ -158,7 +159,7 @@ def build_acquisition_feed(
 
         _el(entry, "updated", doc.modified or doc.added or _now_iso())
 
-        if doc.content:
+        if include_content and doc.content:
             snippet = doc.content[:200].strip()
             if len(doc.content) > 200:
                 snippet += "..."
@@ -183,14 +184,14 @@ def build_acquisition_feed(
             "link",
             rel="http://opds-spec.org/image",
             href=f"{base_url}/preview/{doc.id}",
-            type="image/png",
+            type="image/jpeg",
         )
         _el(
             entry,
             "link",
             rel="http://opds-spec.org/image/thumbnail",
             href=f"{base_url}/thumb/{doc.id}",
-            type="image/png",
+            type="image/jpeg",
         )
 
     return _serialize(feed)

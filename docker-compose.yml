@@ -11,4 +11,14 @@ services:
       # CACHE_TTL: "300"
       # OPDS_USERNAME: "reader"
       # OPDS_PASSWORD: "secret"
+      # THUMBNAIL_DIR: "/data/thumbnails"
+      # THUMBNAIL_PREGENERATE: "true"
+      # THUMB_MAX_SIZE: "300"
+      # PREVIEW_MAX_SIZE: "1000"
+      # OPDS_INCLUDE_CONTENT: "false"
+    volumes:
+      - thumbnails:/data/thumbnails
     restart: unless-stopped
+
+volumes:
+  thumbnails:

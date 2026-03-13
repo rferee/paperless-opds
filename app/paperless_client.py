@@ -190,3 +190,9 @@ class PaperlessClient:
             "content-type": resp.headers.get("content-type", "application/pdf"),
         }
         return resp.aiter_bytes(chunk_size=65536), {k: v for k, v in headers.items() if v}
+
+    async def get_preview_bytes(self, doc_id: int) -> bytes:
+        """Fetch the full preview PDF as bytes (non-streaming)."""
+        resp = await self._client.get(f"/api/documents/{doc_id}/preview/", timeout=60.0)
+        resp.raise_for_status()
+        return resp.content
