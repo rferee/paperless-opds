@@ -181,6 +181,13 @@ def build_acquisition_feed(
         _el(
             entry,
             "link",
+            rel="http://opds-spec.org/image",
+            href=f"{base_url}/preview/{doc.id}",
+            type="image/png",
+        )
+        _el(
+            entry,
+            "link",
             rel="http://opds-spec.org/image/thumbnail",
             href=f"{base_url}/thumb/{doc.id}",
             type="image/png",

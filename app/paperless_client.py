@@ -164,7 +164,6 @@ class PaperlessClient:
         headers = {
             "content-type": resp.headers.get("content-type", "application/octet-stream"),
             "content-disposition": resp.headers.get("content-disposition", ""),
-            "content-length": resp.headers.get("content-length", ""),
         }
         return resp.aiter_bytes(chunk_size=65536), {k: v for k, v in headers.items() if v}
 
@@ -189,6 +188,5 @@ class PaperlessClient:
         resp.raise_for_status()
         headers = {
             "content-type": resp.headers.get("content-type", "application/pdf"),
-            "content-length": resp.headers.get("content-length", ""),
         }
         return resp.aiter_bytes(chunk_size=65536), {k: v for k, v in headers.items() if v}
