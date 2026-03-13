@@ -1,6 +1,6 @@
 services:
   paperless-opds:
-    # image: registry.example.com/paperless-opds:latest
+    image: docker-registry.internal.rferee.dev/services/paperless-opds:latest
     ports:
       - "8000:8000"
     environment:
