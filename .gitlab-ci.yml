@@ -1,0 +1,48 @@
+stages:
+  - test
+  - build
+  - post-test
+
+sast:
+  stage: test
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/SAST-IaC.latest.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/Container-Scanning.gitlab-ci.yml
+
+build-docker-image:
+  stage: build
+  image: docker.io/docker:20-git
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $CI_REGISTRY_IMAGE:latest -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA .
+    - docker push $CI_REGISTRY_IMAGE:latest
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
+      changes:
+        - .gitlab-ci.yml
+        - Dockerfile
+        - requirements.txt
+        - app/**/*
+
+container_scanning:
+  stage: post-test
+  needs:
+    - build-docker-image
+  variables:
+    CS_DISABLE_DEPENDENCY_LIST: "true"
+    CS_DEFAULT_BRANCH_IMAGE: $CI_REGISTRY_IMAGE:latest
+    CI_APPLICATION_REPOSITORY: $CI_REGISTRY_IMAGE
+    CI_APPLICATION_TAG: "latest"
+    CS_DISABLE_LANGUAGE_VULNERABILITY_SCAN: "false"
+    CS_ANALYZER_IMAGE: "registry.gitlab.com/security-products/container-scanning/grype:5"
+    SECURE_LOG_LEVEL: "debug"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master"
+      changes:
+        - .gitlab-ci.yml
+        - Dockerfile
+        - requirements.txt
+        - app/**/*

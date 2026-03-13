@@ -1,0 +1,310 @@
+from contextlib import asynccontextmanager
+from typing import Any
+
+from cachetools import TTLCache
+from fastapi import Depends, FastAPI, Query, Request
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
+
+from app.auth import verify_auth
+from app.config import settings
+from app.opds import (
+    ACQUISITION_TYPE,
+    NAVIGATION_TYPE,
+    build_acquisition_feed,
+    build_navigation_feed,
+    build_opensearch_description,
+    build_root_feed,
+)
+from app.paperless_client import PaperlessClient
+
+client: PaperlessClient
+_response_cache: TTLCache = TTLCache(maxsize=256, ttl=600)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global client
+    client = PaperlessClient()
+    yield
+    await client.close()
+
+
+app = FastAPI(title=settings.opds_title, lifespan=lifespan)
+
+
+@app.middleware("http")
+async def response_cache_middleware(request: Request, call_next):
+    """Cache OPDS XML responses for 10 minutes."""
+    path = request.url.path
+    if path.startswith("/opds"):
+        key = str(request.url)
+        cached = _response_cache.get(key)
+        if cached is not None:
+            content, media_type = cached
+            return Response(content=content, media_type=media_type)
+        response = await call_next(request)
+        if response.status_code == 200:
+            body = b""
+            async for chunk in response.body_iterator:
+                body += chunk if isinstance(chunk, bytes) else chunk.encode()
+            media_type = response.media_type or "application/xml"
+            _response_cache[key] = (body, media_type)
+            return Response(content=body, media_type=media_type, headers=dict(response.headers))
+        return response
+    return await call_next(request)
+
+
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/opds")
+
+
+def _extract_select_options(extra_data: Any) -> list[dict[str, str]]:
+    """Extract option id/label pairs from a custom field's extra_data.
+
+    Returns list of {"id": "hex_id", "label": "Option Name"}.
+    """
+    raw: list = []
+    if isinstance(extra_data, dict):
+        raw = extra_data.get("select_options", [])
+    elif isinstance(extra_data, list):
+        raw = extra_data
+    result = []
+    for opt in raw:
+        if isinstance(opt, dict):
+            result.append({"id": str(opt.get("id", "")), "label": str(opt.get("label", opt.get("id", "")))})
+        else:
+            result.append({"id": str(opt), "label": str(opt)})
+    return result
+
+
+def _base_url(request: Request) -> str:
+    return str(request.base_url).rstrip("/")
+
+
+async def _build_acquisition(
+    request: Request,
+    title: str,
+    self_path: str,
+    page: int,
+    **filters,
+) -> Response:
+    base = _base_url(request)
+    docs, total = await client.get_documents(page=page, **filters)
+    tag_map = await client.get_tag_map()
+    corr_map = await client.get_correspondent_map()
+    xml = build_acquisition_feed(
+        base_url=base,
+        title=title,
+        self_href=f"{base}{self_path}",
+        documents=docs,
+        correspondent_map=corr_map,
+        tag_map=tag_map,
+        page=page,
+        total_count=total,
+        page_size=settings.opds_page_size,
+    )
+    return Response(content=xml, media_type=ACQUISITION_TYPE)
+
+
+# --- Navigation feeds ---
+
+
+@app.get("/opds", dependencies=[Depends(verify_auth)])
+async def root_feed(request: Request) -> Response:
+    base = _base_url(request)
+    select_fields = await client.get_select_fields()
+    extra_nav = [
+        (
+            f"urn:uuid:paperless-opds-cf-{f.id}",
+            f"By {f.name}",
+            f"Browse documents by {f.name}",
+            f"{base}/opds/custom-fields/{f.id}",
+        )
+        for f in sorted(select_fields, key=lambda f: f.name)
+    ]
+    xml = build_root_feed(base, settings.opds_title, extra_nav=extra_nav)
+    return Response(content=xml, media_type=NAVIGATION_TYPE)
+
+
+@app.get("/opds/tags", dependencies=[Depends(verify_auth)])
+async def tags_feed(request: Request) -> Response:
+    base = _base_url(request)
+    tags = await client.get_tags()
+    items = [
+        {"id": t.id, "name": t.name, "count": t.document_count, "href": f"{base}/opds/tags/{t.id}"}
+        for t in sorted(tags, key=lambda t: t.name)
+    ]
+    xml = build_navigation_feed(base, "Tags", f"{base}/opds/tags", items)
+    return Response(content=xml, media_type=NAVIGATION_TYPE)
+
+
+@app.get("/opds/correspondents", dependencies=[Depends(verify_auth)])
+async def correspondents_feed(request: Request) -> Response:
+    base = _base_url(request)
+    correspondents = await client.get_correspondents()
+    items = [
+        {"id": c.id, "name": c.name, "count": c.document_count, "href": f"{base}/opds/correspondents/{c.id}"}
+        for c in sorted(correspondents, key=lambda c: c.name)
+    ]
+    xml = build_navigation_feed(base, "Correspondents", f"{base}/opds/correspondents", items)
+    return Response(content=xml, media_type=NAVIGATION_TYPE)
+
+
+@app.get("/opds/document-types", dependencies=[Depends(verify_auth)])
+async def document_types_feed(request: Request) -> Response:
+    base = _base_url(request)
+    doc_types = await client.get_document_types()
+    items = [
+        {"id": dt.id, "name": dt.name, "count": dt.document_count, "href": f"{base}/opds/document-types/{dt.id}"}
+        for dt in sorted(doc_types, key=lambda dt: dt.name)
+    ]
+    xml = build_navigation_feed(base, "Document Types", f"{base}/opds/document-types", items)
+    return Response(content=xml, media_type=NAVIGATION_TYPE)
+
+
+# --- Acquisition feeds ---
+
+
+@app.get("/opds/all", dependencies=[Depends(verify_auth)])
+async def all_documents(request: Request, page: int = Query(1, ge=1)) -> Response:
+    return await _build_acquisition(request, "All Documents", "/opds/all", page, ordering="title")
+
+
+@app.get("/opds/recent", dependencies=[Depends(verify_auth)])
+async def recent_documents(request: Request, page: int = Query(1, ge=1)) -> Response:
+    return await _build_acquisition(request, "Recent Documents", "/opds/recent", page, ordering="-added")
+
+
+@app.get("/opds/tags/{tag_id}", dependencies=[Depends(verify_auth)])
+async def tag_documents(request: Request, tag_id: int, page: int = Query(1, ge=1)) -> Response:
+    tag_map = await client.get_tag_map()
+    name = tag_map.get(tag_id, f"Tag {tag_id}")
+    return await _build_acquisition(request, name, f"/opds/tags/{tag_id}", page, tags__id__all=tag_id)
+
+
+@app.get("/opds/correspondents/{corr_id}", dependencies=[Depends(verify_auth)])
+async def correspondent_documents(request: Request, corr_id: int, page: int = Query(1, ge=1)) -> Response:
+    corr_map = await client.get_correspondent_map()
+    name = corr_map.get(corr_id, f"Correspondent {corr_id}")
+    return await _build_acquisition(request, name, f"/opds/correspondents/{corr_id}", page, correspondent__id=corr_id)
+
+
+@app.get("/opds/document-types/{dt_id}", dependencies=[Depends(verify_auth)])
+async def document_type_documents(request: Request, dt_id: int, page: int = Query(1, ge=1)) -> Response:
+    dt_map = await client.get_document_type_map()
+    name = dt_map.get(dt_id, f"Document Type {dt_id}")
+    return await _build_acquisition(request, name, f"/opds/document-types/{dt_id}", page, document_type__id=dt_id)
+
+
+# --- Custom field feeds ---
+
+
+@app.get("/opds/custom-fields/{field_id}", dependencies=[Depends(verify_auth)])
+async def custom_field_options_feed(request: Request, field_id: int) -> Response:
+    """Navigation feed listing the select options for a custom field."""
+    base = _base_url(request)
+    select_fields = await client.get_select_fields()
+    field = next((f for f in select_fields if f.id == field_id), None)
+    if field is None:
+        return Response(content="Not found", status_code=404)
+
+    options = _extract_select_options(field.extra_data)
+
+    items = [
+        {
+            "id": f"cf-{field_id}-{opt['id']}",
+            "name": opt["label"],
+            "count": 0,
+            "href": f"{base}/opds/custom-fields/{field_id}/{opt['id']}",
+        }
+        for opt in options
+    ]
+    xml = build_navigation_feed(
+        base, f"By {field.name}", f"{base}/opds/custom-fields/{field_id}", items
+    )
+    return Response(content=xml, media_type=NAVIGATION_TYPE)
+
+
+@app.get("/opds/custom-fields/{field_id}/{option_id}", dependencies=[Depends(verify_auth)])
+async def custom_field_option_documents(
+    request: Request, field_id: int, option_id: str, page: int = Query(1, ge=1)
+) -> Response:
+    """Acquisition feed for documents matching a specific select option."""
+    base = _base_url(request)
+    select_fields = await client.get_select_fields()
+    field = next((f for f in select_fields if f.id == field_id), None)
+    option_name = option_id
+    if field is not None:
+        options = _extract_select_options(field.extra_data)
+        match = next((o for o in options if o["id"] == option_id), None)
+        if match:
+            option_name = match["label"]
+
+    docs, total = await client.get_documents_by_custom_field_select(
+        field_id=field_id, option_id=option_id, page=page
+    )
+    tag_map = await client.get_tag_map()
+    corr_map = await client.get_correspondent_map()
+    xml = build_acquisition_feed(
+        base_url=base,
+        title=option_name,
+        self_href=f"{base}/opds/custom-fields/{field_id}/{option_id}",
+        documents=docs,
+        correspondent_map=corr_map,
+        tag_map=tag_map,
+        page=page,
+        total_count=total,
+        page_size=settings.opds_page_size,
+    )
+    return Response(content=xml, media_type=ACQUISITION_TYPE)
+
+
+# --- Search ---
+
+
+@app.get("/opds/search", dependencies=[Depends(verify_auth)])
+async def search(request: Request, query: str = Query(""), page: int = Query(1, ge=1)) -> Response:
+    base = _base_url(request)
+    docs, total = await client.search_documents(query=query, page=page)
+    tag_map = await client.get_tag_map()
+    corr_map = await client.get_correspondent_map()
+    xml = build_acquisition_feed(
+        base_url=base,
+        title=f"Search: {query}",
+        self_href=f"{base}/opds/search?query={query}",
+        documents=docs,
+        correspondent_map=corr_map,
+        tag_map=tag_map,
+        page=page,
+        total_count=total,
+        page_size=settings.opds_page_size,
+    )
+    return Response(content=xml, media_type=ACQUISITION_TYPE)
+
+
+@app.get("/opds/opensearch.xml", dependencies=[Depends(verify_auth)])
+async def opensearch(request: Request) -> Response:
+    xml = build_opensearch_description(_base_url(request), settings.opds_title)
+    return Response(content=xml, media_type="application/opensearchdescription+xml")
+
+
+# --- Proxy routes ---
+
+
+@app.get("/download/{doc_id}", dependencies=[Depends(verify_auth)])
+async def download_document(doc_id: int) -> StreamingResponse:
+    stream, headers = await client.stream_download(doc_id)
+    return StreamingResponse(content=stream, headers=headers)
+
+
+@app.get("/thumb/{doc_id}", dependencies=[Depends(verify_auth)])
+async def thumbnail(doc_id: int) -> Response:
+    data, headers = await client.get_thumbnail(doc_id)
+    return Response(content=data, headers=headers)
+
+
+@app.get("/preview/{doc_id}", dependencies=[Depends(verify_auth)])
+async def preview(doc_id: int) -> StreamingResponse:
+    stream, headers = await client.stream_preview(doc_id)
+    return StreamingResponse(content=stream, headers=headers)

@@ -1,0 +1,14 @@
+services:
+  paperless-opds:
+    # image: registry.example.com/paperless-opds:latest
+    ports:
+      - "8000:8000"
+    environment:
+      PAPERLESS_URL: "https://paperless.example.com"
+      PAPERLESS_API_KEY: "your-api-key-here"
+      # OPDS_TITLE: "My Library"
+      # OPDS_PAGE_SIZE: "25"
+      # CACHE_TTL: "300"
+      # OPDS_USERNAME: "reader"
+      # OPDS_PASSWORD: "secret"
+    restart: unless-stopped
