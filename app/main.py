@@ -103,7 +103,12 @@ def _extract_select_options(extra_data: Any) -> list[dict[str, str]]:
 
 
 def _base_url(request: Request) -> str:
-    return str(request.base_url).rstrip("/")
+    url = str(request.base_url).rstrip("/")
+    # Respect X-Forwarded-Proto from reverse proxy
+    proto = request.headers.get("x-forwarded-proto")
+    if proto and url.startswith("http://") and proto == "https":
+        url = "https://" + url[7:]
+    return url
 
 
 async def _build_acquisition(
