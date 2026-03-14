@@ -188,8 +188,9 @@ async def root_feed(request: Request) -> Response:
 async def tags_feed(request: Request) -> Response:
     base = _base_url(request)
     tags = await client.get_tags()
+    tag_counts = doc_cache_manager.get_tag_counts() if doc_cache_manager and doc_cache_manager.is_ready else None
     items = [
-        {"id": t.id, "name": t.name, "count": t.document_count, "href": f"{base}/opds/tags/{t.id}"}
+        {"id": t.id, "name": t.name, "count": tag_counts.get(t.id, 0) if tag_counts else t.document_count, "href": f"{base}/opds/tags/{t.id}"}
         for t in sorted(tags, key=lambda t: t.name)
     ]
     xml = build_navigation_feed(base, "Tags", f"{base}/opds/tags", items)
@@ -200,8 +201,9 @@ async def tags_feed(request: Request) -> Response:
 async def correspondents_feed(request: Request) -> Response:
     base = _base_url(request)
     correspondents = await client.get_correspondents()
+    corr_counts = doc_cache_manager.get_correspondent_counts() if doc_cache_manager and doc_cache_manager.is_ready else None
     items = [
-        {"id": c.id, "name": c.name, "count": c.document_count, "href": f"{base}/opds/correspondents/{c.id}"}
+        {"id": c.id, "name": c.name, "count": corr_counts.get(c.id, 0) if corr_counts else c.document_count, "href": f"{base}/opds/correspondents/{c.id}"}
         for c in sorted(correspondents, key=lambda c: c.name)
     ]
     xml = build_navigation_feed(base, "Correspondents", f"{base}/opds/correspondents", items)
@@ -212,8 +214,9 @@ async def correspondents_feed(request: Request) -> Response:
 async def document_types_feed(request: Request) -> Response:
     base = _base_url(request)
     doc_types = await client.get_document_types()
+    dt_counts = doc_cache_manager.get_document_type_counts() if doc_cache_manager and doc_cache_manager.is_ready else None
     items = [
-        {"id": dt.id, "name": dt.name, "count": dt.document_count, "href": f"{base}/opds/document-types/{dt.id}"}
+        {"id": dt.id, "name": dt.name, "count": dt_counts.get(dt.id, 0) if dt_counts else dt.document_count, "href": f"{base}/opds/document-types/{dt.id}"}
         for dt in sorted(doc_types, key=lambda dt: dt.name)
     ]
     xml = build_navigation_feed(base, "Document Types", f"{base}/opds/document-types", items)
@@ -267,12 +270,13 @@ async def custom_field_options_feed(request: Request, field_id: int) -> Response
         return Response(content="Not found", status_code=404)
 
     options = _extract_select_options(field.extra_data)
+    cf_counts = doc_cache_manager.get_custom_field_select_counts(field_id) if doc_cache_manager and doc_cache_manager.is_ready else None
 
     items = [
         {
             "id": f"cf-{field_id}-{opt['id']}",
             "name": opt["label"],
-            "count": 0,
+            "count": cf_counts.get(opt["id"], 0) if cf_counts else 0,
             "href": f"{base}/opds/custom-fields/{field_id}/{opt['id']}",
         }
         for opt in options
@@ -358,7 +362,7 @@ async def opensearch(request: Request) -> Response:
 
 @app.get("/download/{doc_id}", dependencies=[Depends(verify_auth)])
 async def download_document(doc_id: int) -> StreamingResponse:
-    stream, headers = await client.stream_download(doc_id)
+    stream, headers = await client.stream_download(doc_id, original=settings.download_original)
     return StreamingResponse(content=stream, headers=headers)
 
 

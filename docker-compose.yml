@@ -16,6 +16,7 @@ services:
       # THUMB_MAX_SIZE: "300"
       # PREVIEW_MAX_SIZE: "1000"
       # OPDS_INCLUDE_CONTENT: "false"
+      # DOWNLOAD_ORIGINAL: "false"
       # DOCUMENT_CACHE_ENABLED: "true"
       # DOCUMENT_CACHE_REFRESH_INTERVAL: "600"
     volumes:

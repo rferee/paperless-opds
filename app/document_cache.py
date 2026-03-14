@@ -93,6 +93,36 @@ class DocumentCacheManager:
         start = (page - 1) * psize
         return docs[start : start + psize], total
 
+    def get_tag_counts(self) -> dict[int, int]:
+        counts: dict[int, int] = {}
+        for doc in self._documents.values():
+            for tag_id in doc.tags:
+                counts[tag_id] = counts.get(tag_id, 0) + 1
+        return counts
+
+    def get_correspondent_counts(self) -> dict[int, int]:
+        counts: dict[int, int] = {}
+        for doc in self._documents.values():
+            if doc.correspondent is not None:
+                counts[doc.correspondent] = counts.get(doc.correspondent, 0) + 1
+        return counts
+
+    def get_document_type_counts(self) -> dict[int, int]:
+        counts: dict[int, int] = {}
+        for doc in self._documents.values():
+            if doc.document_type is not None:
+                counts[doc.document_type] = counts.get(doc.document_type, 0) + 1
+        return counts
+
+    def get_custom_field_select_counts(self, field_id: int) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for doc in self._documents.values():
+            for cfi in doc.custom_fields:
+                if cfi.field == field_id and cfi.value is not None:
+                    key = str(cfi.value)
+                    counts[key] = counts.get(key, 0) + 1
+        return counts
+
     async def run_sync_loop(self) -> None:
         while True:
             try:

@@ -81,6 +81,7 @@ All settings can be provided via environment variables or a `config.json` file. 
 | `THUMBNAIL_QUALITY` | — | `85` | JPEG quality (1-100) |
 | `THUMBNAIL_BATCH_SIZE` | — | `50` | Documents per batch during pre-generation |
 | `THUMBNAIL_MAX_RETRIES` | — | `3` | Retries per document on generation failure |
+| `DOWNLOAD_ORIGINAL` | — | `false` | Serve the original (pre-processing) file instead of the archived version |
 | `OPDS_INCLUDE_CONTENT` | — | `false` | Include document text snippets in OPDS feed entries |
 | `DOCUMENT_CACHE_ENABLED` | — | `true` | Cache full document list in memory for faster feeds |
 | `DOCUMENT_CACHE_REFRESH_INTERVAL` | — | `600` | Seconds between document cache refresh cycles |

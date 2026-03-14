@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     document_cache_refresh_interval: int = 600  # seconds (default 10 minutes)
     document_cache_batch_size: int = 100
 
+    # Download behavior
+    download_original: bool = False
+
     # OPDS content
     opds_include_content: bool = False
 
