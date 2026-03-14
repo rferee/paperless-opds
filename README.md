@@ -9,6 +9,7 @@ Middleware that exposes a [Paperless-ngx](https://docs.paperless-ngx.com/) docum
 - **Search** via OpenSearch
 - **Proxied downloads** — readers never need Paperless credentials
 - **Thumbnail & preview caching** — disk-cached JPEG images, pre-generated at startup
+- **Document list pre-cache** — full document list cached in memory, refreshed periodically
 - **Response caching** — all OPDS XML feeds cached 10 minutes
 - **Optional HTTP Basic Auth** for protecting the feed
 - **Config via env vars or `config.json`**
@@ -81,6 +82,9 @@ All settings can be provided via environment variables or a `config.json` file. 
 | `THUMBNAIL_BATCH_SIZE` | — | `50` | Documents per batch during pre-generation |
 | `THUMBNAIL_MAX_RETRIES` | — | `3` | Retries per document on generation failure |
 | `OPDS_INCLUDE_CONTENT` | — | `false` | Include document text snippets in OPDS feed entries |
+| `DOCUMENT_CACHE_ENABLED` | — | `true` | Cache full document list in memory for faster feeds |
+| `DOCUMENT_CACHE_REFRESH_INTERVAL` | — | `600` | Seconds between document cache refresh cycles |
+| `DOCUMENT_CACHE_BATCH_SIZE` | — | `100` | Documents per page when fetching from Paperless API |
 
 Example `config.json`:
 
@@ -105,6 +109,16 @@ Cached images are stored in `THUMBNAIL_DIR` (default `/data/thumbnails`) under `
 Pre-generation runs in the background at startup and processes documents sequentially in batches. If a thumbnail/preview is requested before pre-generation reaches it, it will be generated on demand.
 
 Set `THUMBNAIL_PREGENERATE=false` to disable startup pre-generation (images will only be generated on first request).
+
+## Document List Pre-Cache
+
+When `DOCUMENT_CACHE_ENABLED=true` (default), the app loads the full document list into memory at startup and refreshes it every `DOCUMENT_CACHE_REFRESH_INTERVAL` seconds (default 600 / 10 minutes). This makes OPDS feed responses much faster since they don't need to query the Paperless API on every request.
+
+The cache refresh cycle also checks for missing thumbnails and generates them, combining both operations into a single background loop. When the cache is enabled, it replaces the standalone `THUMBNAIL_PREGENERATE` behavior.
+
+Search always queries the Paperless API directly (full-text search cannot be cached). If the cache is not yet ready (during initial startup), requests fall back to direct API calls.
+
+Set `DOCUMENT_CACHE_ENABLED=false` to disable caching and use direct API calls for every request (original behavior).
 
 ## OPDS Endpoints
 

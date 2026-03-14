@@ -17,6 +17,7 @@ from app.opds import (
     build_opensearch_description,
     build_root_feed,
 )
+from app.document_cache import DocumentCacheManager
 from app.paperless_client import PaperlessClient
 from app.thumbnail_cache import ThumbnailCacheManager
 
@@ -24,6 +25,7 @@ logger = logging.getLogger("uvicorn.error")
 
 client: PaperlessClient
 cache_manager: ThumbnailCacheManager
+doc_cache_manager: DocumentCacheManager | None = None
 _response_cache: TTLCache = TTLCache(maxsize=256, ttl=600)
 
 
@@ -37,17 +39,39 @@ def _pregen_done_callback(task: asyncio.Task) -> None:
         logger.error("Thumbnail pre-generation failed: %s", exc, exc_info=exc)
 
 
+def _sync_done_callback(task: asyncio.Task) -> None:
+    """Log any exception from the background document cache sync task."""
+    if task.cancelled():
+        logger.info("Document cache sync was cancelled")
+        return
+    exc = task.exception()
+    if exc:
+        logger.error("Document cache sync failed: %s", exc, exc_info=exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global client, cache_manager
+    global client, cache_manager, doc_cache_manager
     client = PaperlessClient()
     cache_manager = ThumbnailCacheManager(client)
+    sync_task = None
     pregen_task = None
-    if settings.thumbnail_pregenerate:
+
+    if settings.document_cache_enabled:
+        doc_cache_manager = DocumentCacheManager(client, cache_manager, _response_cache)
+        logger.info("Launching document cache sync worker (refresh every %ds)...",
+                     settings.document_cache_refresh_interval)
+        sync_task = asyncio.create_task(doc_cache_manager.run_sync_loop())
+        sync_task.add_done_callback(_sync_done_callback)
+    elif settings.thumbnail_pregenerate:
         logger.info("Launching thumbnail pre-generation worker...")
         pregen_task = asyncio.create_task(cache_manager.pregenerate_all())
         pregen_task.add_done_callback(_pregen_done_callback)
+
     yield
+
+    if sync_task and not sync_task.done():
+        sync_task.cancel()
     if pregen_task and not pregen_task.done():
         pregen_task.cancel()
     await client.close()
@@ -119,7 +143,10 @@ async def _build_acquisition(
     **filters,
 ) -> Response:
     base = _base_url(request)
-    docs, total = await client.get_documents(page=page, **filters)
+    if doc_cache_manager is not None:
+        docs, total = await doc_cache_manager.get_documents(page=page, **filters)
+    else:
+        docs, total = await client.get_documents(page=page, **filters)
     tag_map = await client.get_tag_map()
     corr_map = await client.get_correspondent_map()
     xml = build_acquisition_feed(
@@ -271,9 +298,14 @@ async def custom_field_option_documents(
         if match:
             option_name = match["label"]
 
-    docs, total = await client.get_documents_by_custom_field_select(
-        field_id=field_id, option_id=option_id, page=page
-    )
+    if doc_cache_manager is not None:
+        docs, total = await doc_cache_manager.get_documents_by_custom_field_select(
+            field_id=field_id, option_id=option_id, page=page,
+        )
+    else:
+        docs, total = await client.get_documents_by_custom_field_select(
+            field_id=field_id, option_id=option_id, page=page,
+        )
     tag_map = await client.get_tag_map()
     corr_map = await client.get_correspondent_map()
     xml = build_acquisition_feed(

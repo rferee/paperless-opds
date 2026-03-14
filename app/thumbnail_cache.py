@@ -131,7 +131,7 @@ class ThumbnailCacheManager:
                              ", ".join(str(d) for d in batch))
 
                 for doc_id in batch:
-                    success = await self._generate_with_retry(doc_id)
+                    success = await self.generate_with_retry(doc_id)
                     if success:
                         generated += 1
                         logger.info("[thumbnails] Generated images for doc %d (%d generated, %d failed, %d skipped)",
@@ -164,7 +164,7 @@ class ThumbnailCacheManager:
         logger.info("[thumbnails] Pre-generation complete: %d total docs, %d already cached, %d generated, %d failed",
                      total_docs, skipped, generated, failed)
 
-    async def _generate_with_retry(self, doc_id: int) -> bool:
+    async def generate_with_retry(self, doc_id: int) -> bool:
         """Generate thumb and preview for a document with exponential backoff."""
         for attempt in range(settings.thumbnail_max_retries):
             try:

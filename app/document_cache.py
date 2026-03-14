@@ -1,0 +1,187 @@
+import asyncio
+import logging
+
+from cachetools import TTLCache
+
+from app.config import settings
+from app.models import PaperlessDocument
+from app.paperless_client import PaperlessClient
+from app.thumbnail_cache import ThumbnailCacheManager
+
+logger = logging.getLogger("uvicorn.error")
+
+
+class DocumentCacheManager:
+    def __init__(
+        self,
+        client: PaperlessClient,
+        thumbnail_manager: ThumbnailCacheManager,
+        response_cache: TTLCache,
+    ) -> None:
+        self._client = client
+        self._thumbnail_manager = thumbnail_manager
+        self._response_cache = response_cache
+        self._documents: dict[int, PaperlessDocument] = {}
+        self._ready = asyncio.Event()
+
+    @property
+    def is_ready(self) -> bool:
+        return self._ready.is_set()
+
+    async def get_documents(
+        self,
+        page: int = 1,
+        page_size: int | None = None,
+        ordering: str | None = None,
+        tags__id__all: int | None = None,
+        correspondent__id: int | None = None,
+        document_type__id: int | None = None,
+    ) -> tuple[list[PaperlessDocument], int]:
+        if not self._ready.is_set():
+            return await self._client.get_documents(
+                page=page,
+                page_size=page_size,
+                ordering=ordering,
+                tags__id__all=tags__id__all,
+                correspondent__id=correspondent__id,
+                document_type__id=document_type__id,
+            )
+
+        psize = page_size or settings.opds_page_size
+        docs = list(self._documents.values())
+
+        # Filter
+        if tags__id__all is not None:
+            docs = [d for d in docs if tags__id__all in d.tags]
+        if correspondent__id is not None:
+            docs = [d for d in docs if d.correspondent == correspondent__id]
+        if document_type__id is not None:
+            docs = [d for d in docs if d.document_type == document_type__id]
+
+        # Sort
+        if ordering:
+            desc = ordering.startswith("-")
+            field = ordering.lstrip("-")
+            docs.sort(
+                key=lambda d: (getattr(d, field, None) or "") if isinstance(getattr(d, field, None), str) else (getattr(d, field, None) or 0),
+                reverse=desc,
+            )
+
+        total = len(docs)
+        start = (page - 1) * psize
+        return docs[start : start + psize], total
+
+    async def get_documents_by_custom_field_select(
+        self,
+        field_id: int,
+        option_id: str,
+        page: int = 1,
+        page_size: int | None = None,
+    ) -> tuple[list[PaperlessDocument], int]:
+        if not self._ready.is_set():
+            return await self._client.get_documents_by_custom_field_select(
+                field_id=field_id, option_id=option_id, page=page, page_size=page_size,
+            )
+
+        psize = page_size or settings.opds_page_size
+        docs = [
+            d for d in self._documents.values()
+            if any(cfi.field == field_id and str(cfi.value) == option_id for cfi in d.custom_fields)
+        ]
+
+        total = len(docs)
+        start = (page - 1) * psize
+        return docs[start : start + psize], total
+
+    async def run_sync_loop(self) -> None:
+        while True:
+            try:
+                await self._sync_once()
+            except Exception:
+                logger.exception("[doc-cache] Sync failed, will retry next cycle")
+            await asyncio.sleep(settings.document_cache_refresh_interval)
+
+    async def _sync_once(self) -> None:
+        logger.info("[doc-cache] Starting sync cycle...")
+        new_docs = await self._fetch_all_documents()
+
+        # Log changes
+        old_ids = set(self._documents.keys())
+        new_ids = set(new_docs.keys())
+        added = new_ids - old_ids
+        removed = old_ids - new_ids
+        if added:
+            logger.info("[doc-cache] %d new document(s): %s", len(added), sorted(added))
+        if removed:
+            logger.info("[doc-cache] %d removed document(s): %s", len(removed), sorted(removed))
+
+        # Atomic swap
+        self._documents = new_docs
+        logger.info("[doc-cache] Cache updated: %d documents", len(new_docs))
+
+        # Clear response cache so stale XML is not served
+        self._response_cache.clear()
+
+        # Set ready after first successful sync
+        if not self._ready.is_set():
+            self._ready.set()
+            logger.info("[doc-cache] Initial cache ready")
+
+        # Check for missing thumbnails
+        await self._check_thumbnails(list(new_ids))
+
+    async def _fetch_all_documents(self) -> dict[int, PaperlessDocument]:
+        docs: dict[int, PaperlessDocument] = {}
+        api_page = 1
+        batch_size = settings.document_cache_batch_size
+
+        while True:
+            logger.info("[doc-cache] Fetching document page %d (batch size %d)...", api_page, batch_size)
+            resp = await self._client._client.get(
+                "/api/documents/",
+                params={"page": api_page, "page_size": batch_size},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            for r in data.get("results", []):
+                doc = PaperlessDocument(**r)
+                docs[doc.id] = doc
+
+            if api_page == 1:
+                logger.info("[doc-cache] Paperless reports %d total documents", data.get("count", 0))
+
+            if not data.get("next"):
+                break
+            api_page += 1
+
+        return docs
+
+    async def _check_thumbnails(self, doc_ids: list[int]) -> None:
+        missing: list[int] = []
+        for doc_id in doc_ids:
+            if not self._thumbnail_manager.has_thumb(doc_id) or not self._thumbnail_manager.has_preview(doc_id):
+                missing.append(doc_id)
+
+        if not missing:
+            logger.info("[doc-cache] All thumbnails up to date")
+            return
+
+        logger.info("[doc-cache] %d document(s) missing thumbnails, generating...", len(missing))
+        generated = 0
+        failed = 0
+        batch_size = settings.thumbnail_batch_size
+
+        for i in range(0, len(missing), batch_size):
+            batch = missing[i : i + batch_size]
+            logger.info("[doc-cache] Processing thumbnail batch %d-%d of %d",
+                        i + 1, min(i + batch_size, len(missing)), len(missing))
+            for doc_id in batch:
+                success = await self._thumbnail_manager.generate_with_retry(doc_id)
+                if success:
+                    generated += 1
+                else:
+                    failed += 1
+
+        logger.info("[doc-cache] Thumbnail check complete: %d generated, %d failed, %d already cached",
+                    generated, failed, len(doc_ids) - len(missing))

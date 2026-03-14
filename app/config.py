@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     thumbnail_max_retries: int = 3
     thumbnail_pregenerate: bool = True
 
+    # Document list pre-cache
+    document_cache_enabled: bool = True
+    document_cache_refresh_interval: int = 600  # seconds (default 10 minutes)
+    document_cache_batch_size: int = 100
+
     # OPDS content
     opds_include_content: bool = False
 
