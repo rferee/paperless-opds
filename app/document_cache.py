@@ -11,6 +11,16 @@ from app.thumbnail_cache import ThumbnailCacheManager
 logger = logging.getLogger("uvicorn.error")
 
 
+def _thumb_check_done_callback(task: asyncio.Task) -> None:
+    """Log any exception from a background thumbnail check."""
+    if task.cancelled():
+        logger.info("[doc-cache] Thumbnail check was cancelled")
+        return
+    exc = task.exception()
+    if exc:
+        logger.error("[doc-cache] Thumbnail check failed: %s", exc, exc_info=exc)
+
+
 class DocumentCacheManager:
     def __init__(
         self,
@@ -23,6 +33,7 @@ class DocumentCacheManager:
         self._response_cache = response_cache
         self._documents: dict[int, PaperlessDocument] = {}
         self._ready = asyncio.Event()
+        self._thumb_task: asyncio.Task | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -124,12 +135,17 @@ class DocumentCacheManager:
         return counts
 
     async def run_sync_loop(self) -> None:
-        while True:
-            try:
-                await self._sync_once()
-            except Exception:
-                logger.exception("[doc-cache] Sync failed, will retry next cycle")
-            await asyncio.sleep(settings.document_cache_refresh_interval)
+        try:
+            while True:
+                try:
+                    await self._sync_once()
+                except Exception:
+                    logger.exception("[doc-cache] Sync failed, will retry next cycle")
+                await asyncio.sleep(settings.document_cache_refresh_interval)
+        finally:
+            # Stop the background thumbnail check along with the sync loop (lifespan shutdown cancels it)
+            if self._thumb_task is not None and not self._thumb_task.done():
+                self._thumb_task.cancel()
 
     async def _sync_once(self) -> None:
         logger.info("[doc-cache] Starting sync cycle...")
@@ -166,8 +182,12 @@ class DocumentCacheManager:
             self._ready.set()
             logger.info("[doc-cache] Initial cache ready")
 
-        # Check for missing thumbnails
-        await self._check_thumbnails(list(new_ids))
+        # Check for missing thumbnails in the background, so a long backfill never delays the next refresh
+        if self._thumb_task is not None and not self._thumb_task.done():
+            logger.info("[doc-cache] Previous thumbnail check still running, not starting another")
+        else:
+            self._thumb_task = asyncio.create_task(self._check_thumbnails(list(new_ids)))
+            self._thumb_task.add_done_callback(_thumb_check_done_callback)
 
     async def _fetch_all_documents(self) -> dict[int, PaperlessDocument]:
         docs: dict[int, PaperlessDocument] = {}
