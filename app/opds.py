@@ -1,4 +1,5 @@
 import math
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
@@ -17,15 +18,19 @@ ET.register_namespace("opds", OPDS_NS)
 ET.register_namespace("opensearch", OPENSEARCH_NS)
 ET.register_namespace("dc", DC_NS)
 
+# Characters outside the XML 1.0 Char range: ElementTree escapes markup but writes these unchanged,
+# which makes the feed unparsable (or, for lone surrogates, fails to encode as UTF-8)
+_INVALID_XML = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _el(parent: ET.Element, tag: str, text: str | None = None, **attribs: str) -> ET.Element:
-    elem = ET.SubElement(parent, tag, **attribs)
+    elem = ET.SubElement(parent, tag, {name: _INVALID_XML.sub("", value) for name, value in attribs.items()})
     if text is not None:
-        elem.text = text
+        elem.text = _INVALID_XML.sub("", text)
     return elem
 
 
