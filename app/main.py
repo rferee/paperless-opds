@@ -86,7 +86,8 @@ async def response_cache_middleware(request: Request, call_next):
     path = request.url.path
     # Only authorized requests may read or fill the cache; others reach verify_auth and get a 401
     if path.startswith("/opds") and await request_is_authorized(request):
-        key = str(request.url)
+        # Feed links use _base_url, which honours X-Forwarded-Proto, so the key must too
+        key = _base_url(request) + request.url.path + ("?" + request.url.query if request.url.query else "")
         cached = _response_cache.get(key)
         if cached is not None:
             content, media_type = cached
