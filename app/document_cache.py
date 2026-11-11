@@ -191,18 +191,14 @@ class DocumentCacheManager:
 
     async def _fetch_all_documents(self) -> dict[int, PaperlessDocument]:
         docs: dict[int, PaperlessDocument] = {}
-        api_page = 1
+        api_page = 0
         batch_size = settings.document_cache_batch_size
 
-        while True:
-            logger.info("[doc-cache] Fetching document page %d (batch size %d)...", api_page, batch_size)
-            resp = await self._client._client.get(
-                "/api/documents/",
-                # Feeds only show a short content snippet: don't hold every document's full OCR text in memory
-                params={"page": api_page, "page_size": batch_size, "truncate_content": "true"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        # Feeds only show a short content snippet: don't hold every document's full OCR text in memory
+        pages = self._client.iter_pages("/api/documents/", page_size=batch_size, truncate_content="true")
+        async for data in pages:
+            api_page += 1
+            logger.info("[doc-cache] Fetched document page %d (batch size %d)", api_page, batch_size)
 
             for r in data.get("results", []):
                 doc = PaperlessDocument(**r)
@@ -210,10 +206,6 @@ class DocumentCacheManager:
 
             if api_page == 1:
                 logger.info("[doc-cache] Paperless reports %d total documents", data.get("count", 0))
-
-            if not data.get("next"):
-                break
-            api_page += 1
 
         return docs
 

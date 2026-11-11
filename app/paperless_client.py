@@ -27,18 +27,23 @@ class PaperlessClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def _fetch_all_pages(self, endpoint: str) -> list[dict]:
-        """Fetch all pages from a paginated Paperless endpoint."""
-        results: list[dict] = []
+    async def iter_pages(self, endpoint: str, page_size: int = 100, **params: str) -> AsyncIterator[dict]:
+        """Yield the JSON of each page of a paginated Paperless endpoint, following "next" to the last page."""
         page = 1
         while True:
-            resp = await self._client.get(endpoint, params={"page": page, "page_size": 100})
+            resp = await self._client.get(endpoint, params={"page": page, "page_size": page_size, **params})
             resp.raise_for_status()
             data = resp.json()
-            results.extend(data.get("results", []))
+            yield data
             if not data.get("next"):
                 break
             page += 1
+
+    async def _fetch_all_pages(self, endpoint: str) -> list[dict]:
+        """Fetch all pages from a paginated Paperless endpoint."""
+        results: list[dict] = []
+        async for data in self.iter_pages(endpoint):
+            results.extend(data.get("results", []))
         return results
 
     async def get_documents(

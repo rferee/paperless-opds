@@ -121,22 +121,22 @@ class ThumbnailCacheManager:
         failed = 0
         skipped = 0
         total_docs = 0
-        api_page = 1
+        api_page = 0
         batch_size = settings.thumbnail_batch_size
         batch_buffer: list[int] = []
+        pages = self._client.iter_pages("/api/documents/", fields="id")
 
         while True:
-            logger.info("[thumbnails] Fetching document page %d from Paperless...", api_page)
+            # Only a failed page fetch aborts the walk; errors while processing a page still propagate
             try:
-                resp = await self._client._client.get(
-                    "/api/documents/",
-                    params={"page": api_page, "page_size": 100, "fields": "id"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
+                data = await anext(pages, None)
             except Exception:
-                logger.exception("[thumbnails] Failed to fetch document page %d — aborting", api_page)
+                logger.exception("[thumbnails] Failed to fetch document page %d — aborting", api_page + 1)
                 break
+            if data is None:
+                break
+            api_page += 1
+            logger.info("[thumbnails] Fetched document page %d from Paperless", api_page)
 
             page_ids = [r["id"] for r in data.get("results", [])]
             page_total = data.get("count", 0)
@@ -170,11 +170,6 @@ class ThumbnailCacheManager:
                         failed += 1
                         logger.warning("[thumbnails] Skipped doc %d after retries (%d generated, %d failed, %d skipped)",
                                         doc_id, generated, failed, skipped)
-
-            # Check if there are more pages
-            if not data.get("next"):
-                break
-            api_page += 1
 
         # Process any remaining docs in the buffer
         if batch_buffer:
