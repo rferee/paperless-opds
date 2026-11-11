@@ -107,7 +107,7 @@ def build_navigation_feed(
 ) -> str:
     """Build a navigation feed listing items (tags, correspondents, doc types).
 
-    Each item dict: {id, name, count, href}
+    Each item dict: {id, name, count, href}; a count of None leaves out the "<n> documents" content.
     """
     feed = ET.Element(f"{{{ATOM_NS}}}feed")
     _el(feed, "id", f"urn:uuid:paperless-opds-nav-{title.lower().replace(' ', '-')}")
@@ -124,7 +124,8 @@ def build_navigation_feed(
         _el(entry, "title", item["name"])
         _el(entry, "id", f"urn:uuid:paperless-opds-item-{item['id']}")
         _el(entry, "updated", now)
-        _el(entry, "content", f"{item['count']} documents", type="text")
+        if item["count"] is not None:
+            _el(entry, "content", f"{item['count']} documents", type="text")
         _el(entry, "link", rel="subsection", href=item["href"], type=ACQUISITION_TYPE)
 
     return _serialize(feed)

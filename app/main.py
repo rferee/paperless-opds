@@ -330,7 +330,8 @@ async def custom_field_options_feed(request: Request, field_id: int) -> Response
         {
             "id": f"cf-{field_id}-{opt['id']}",
             "name": opt["label"],
-            "count": cf_counts.get(opt["id"], 0) if cf_counts else 0,
+            # Without a ready document cache there is no count to show: Paperless has no per-option document count
+            "count": cf_counts.get(opt["id"], 0) if cf_counts is not None else None,
             "href": f"{base}/opds/custom-fields/{field_id}/{quote(opt['id'], safe='')}",
         }
         for opt in options
