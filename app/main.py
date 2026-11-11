@@ -212,6 +212,7 @@ async def _build_acquisition(
         total_count=total,
         page_size=settings.opds_page_size,
         include_content=settings.opds_include_content,
+        download_original=settings.download_original,
     )
     return Response(content=xml, media_type=ACQUISITION_TYPE)
 
@@ -375,6 +376,7 @@ async def custom_field_option_documents(
         total_count=total,
         page_size=settings.opds_page_size,
         include_content=settings.opds_include_content,
+        download_original=settings.download_original,
     )
     return Response(content=xml, media_type=ACQUISITION_TYPE)
 
@@ -399,6 +401,7 @@ async def search(request: Request, query: str = Query(""), page: int = Query(1, 
         total_count=total,
         page_size=settings.opds_page_size,
         include_content=settings.opds_include_content,
+        download_original=settings.download_original,
     )
     return Response(content=xml, media_type=ACQUISITION_TYPE)
 

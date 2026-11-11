@@ -136,6 +136,7 @@ def build_acquisition_feed(
     total_count: int,
     page_size: int,
     include_content: bool = False,
+    download_original: bool = False,
 ) -> str:
     feed = ET.Element(f"{{{ATOM_NS}}}feed")
     _el(feed, "id", f"urn:uuid:paperless-opds-acq-{title.lower().replace(' ', '-')}")
@@ -177,7 +178,8 @@ def build_acquisition_feed(
             "link",
             rel="http://opds-spec.org/acquisition",
             href=f"{base_url}/download/{doc.id}",
-            type=doc.mime_type,
+            # Paperless serves the archived PDF instead of the original whenever one exists
+            type="application/pdf" if not download_original and doc.archived_file_name else doc.mime_type,
         )
         _el(
             entry,
