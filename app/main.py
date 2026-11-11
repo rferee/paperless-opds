@@ -2,6 +2,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import quote, urlencode
 
 import httpx
 from cachetools import TTLCache
@@ -330,7 +331,7 @@ async def custom_field_options_feed(request: Request, field_id: int) -> Response
             "id": f"cf-{field_id}-{opt['id']}",
             "name": opt["label"],
             "count": cf_counts.get(opt["id"], 0) if cf_counts else 0,
-            "href": f"{base}/opds/custom-fields/{field_id}/{opt['id']}",
+            "href": f"{base}/opds/custom-fields/{field_id}/{quote(opt['id'], safe='')}",
         }
         for opt in options
     ]
@@ -368,7 +369,7 @@ async def custom_field_option_documents(
     xml = build_acquisition_feed(
         base_url=base,
         title=option_name,
-        self_href=f"{base}/opds/custom-fields/{field_id}/{option_id}",
+        self_href=f"{base}/opds/custom-fields/{field_id}/{quote(option_id, safe='')}",
         documents=docs,
         correspondent_map=corr_map,
         tag_map=tag_map,
@@ -393,7 +394,7 @@ async def search(request: Request, query: str = Query(""), page: int = Query(1, 
     xml = build_acquisition_feed(
         base_url=base,
         title=f"Search: {query}",
-        self_href=f"{base}/opds/search?query={query}",
+        self_href=f"{base}/opds/search?{urlencode({'query': query})}",
         documents=docs,
         correspondent_map=corr_map,
         tag_map=tag_map,

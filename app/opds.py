@@ -143,7 +143,8 @@ def build_acquisition_feed(
     _el(feed, "title", title)
     _el(feed, "updated", _now_iso())
 
-    _el(feed, "link", rel="self", href=f"{self_href}?page={page}" if "?" not in self_href else self_href, type=ACQUISITION_TYPE)
+    sep = "&" if "?" in self_href else "?"
+    _el(feed, "link", rel="self", href=f"{self_href}{sep}page={page}", type=ACQUISITION_TYPE)
     _el(feed, "link", rel="start", href=f"{base_url}/opds", type=NAVIGATION_TYPE)
     _el(feed, "link", rel="search", href=f"{base_url}/opds/opensearch.xml", type="application/opensearchdescription+xml")
 
