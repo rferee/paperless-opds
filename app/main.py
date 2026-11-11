@@ -7,7 +7,7 @@ from cachetools import TTLCache
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
-from app.auth import verify_auth
+from app.auth import request_is_authorized, verify_auth
 from app.config import settings
 from app.opds import (
     ACQUISITION_TYPE,
@@ -84,7 +84,8 @@ app = FastAPI(title=settings.opds_title, lifespan=lifespan)
 async def response_cache_middleware(request: Request, call_next):
     """Cache OPDS XML responses for 10 minutes."""
     path = request.url.path
-    if path.startswith("/opds"):
+    # Only authorized requests may read or fill the cache; others reach verify_auth and get a 401
+    if path.startswith("/opds") and await request_is_authorized(request):
         key = str(request.url)
         cached = _response_cache.get(key)
         if cached is not None:
