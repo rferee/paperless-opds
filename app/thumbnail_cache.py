@@ -1,7 +1,9 @@
 import asyncio
 import io
 import logging
+import os
 from pathlib import Path
+from uuid import uuid4
 
 import pymupdf
 from PIL import Image
@@ -10,6 +12,16 @@ from app.config import settings
 from app.paperless_client import PaperlessClient
 
 logger = logging.getLogger("uvicorn.error")
+
+
+def _save_jpeg(img: Image.Image, path: Path) -> None:
+    """Save img as a JPEG at path via a temp file, so path never holds a partially written image."""
+    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        img.save(tmp, "JPEG", quality=settings.thumbnail_quality)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 class ThumbnailCacheManager:
@@ -43,7 +55,7 @@ class ThumbnailCacheManager:
             img = Image.open(io.BytesIO(data))
             img.thumbnail((settings.thumb_max_size, settings.thumb_max_size))
             img = img.convert("RGB")
-            img.save(path, "JPEG", quality=settings.thumbnail_quality)
+            _save_jpeg(img, path)
 
         await asyncio.to_thread(_process)
         return path
@@ -68,7 +80,7 @@ class ThumbnailCacheManager:
                     mat = pymupdf.Matrix(zoom, zoom)
                     pix = page.get_pixmap(matrix=mat)
                     img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                    img.save(path, "JPEG", quality=settings.thumbnail_quality)
+                    _save_jpeg(img, path)
                 finally:
                     doc.close()
 
