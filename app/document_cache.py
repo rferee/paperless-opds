@@ -198,7 +198,8 @@ class DocumentCacheManager:
             logger.info("[doc-cache] Fetching document page %d (batch size %d)...", api_page, batch_size)
             resp = await self._client._client.get(
                 "/api/documents/",
-                params={"page": api_page, "page_size": batch_size},
+                # Feeds only show a short content snippet: don't hold every document's full OCR text in memory
+                params={"page": api_page, "page_size": batch_size, "truncate_content": "true"},
             )
             resp.raise_for_status()
             data = resp.json()
