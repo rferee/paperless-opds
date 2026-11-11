@@ -20,6 +20,7 @@ from app.opds import (
     build_root_feed,
 )
 from app.document_cache import DocumentCacheManager
+from app.models import PaperlessDocument
 from app.paperless_client import PaperlessClient
 from app.thumbnail_cache import ThumbnailCacheManager
 
@@ -200,12 +201,24 @@ async def _build_acquisition(
         docs, total = await doc_cache_manager.get_documents(page=page, **filters)
     else:
         docs, total = await client.get_documents(page=page, **filters)
+    return await _render_acquisition(base, title, f"{base}{self_path}", docs, total, page)
+
+
+async def _render_acquisition(
+    base: str,
+    title: str,
+    self_href: str,
+    docs: list[PaperlessDocument],
+    total: int,
+    page: int,
+) -> Response:
+    """Render one page of documents as an OPDS acquisition feed."""
     tag_map = await client.get_tag_map()
     corr_map = await client.get_correspondent_map()
     xml = build_acquisition_feed(
         base_url=base,
         title=title,
-        self_href=f"{base}{self_path}",
+        self_href=self_href,
         documents=docs,
         correspondent_map=corr_map,
         tag_map=tag_map,
@@ -365,22 +378,8 @@ async def custom_field_option_documents(
         docs, total = await client.get_documents_by_custom_field_select(
             field_id=field_id, option_id=option_id, page=page,
         )
-    tag_map = await client.get_tag_map()
-    corr_map = await client.get_correspondent_map()
-    xml = build_acquisition_feed(
-        base_url=base,
-        title=option_name,
-        self_href=f"{base}/opds/custom-fields/{field_id}/{quote(option_id, safe='')}",
-        documents=docs,
-        correspondent_map=corr_map,
-        tag_map=tag_map,
-        page=page,
-        total_count=total,
-        page_size=settings.opds_page_size,
-        include_content=settings.opds_include_content,
-        download_original=settings.download_original,
-    )
-    return Response(content=xml, media_type=ACQUISITION_TYPE)
+    self_href = f"{base}/opds/custom-fields/{field_id}/{quote(option_id, safe='')}"
+    return await _render_acquisition(base, option_name, self_href, docs, total, page)
 
 
 # --- Search ---
@@ -390,22 +389,8 @@ async def custom_field_option_documents(
 async def search(request: Request, query: str = Query(""), page: int = Query(1, ge=1)) -> Response:
     base = _base_url(request)
     docs, total = await client.search_documents(query=query, page=page)
-    tag_map = await client.get_tag_map()
-    corr_map = await client.get_correspondent_map()
-    xml = build_acquisition_feed(
-        base_url=base,
-        title=f"Search: {query}",
-        self_href=f"{base}/opds/search?{urlencode({'query': query})}",
-        documents=docs,
-        correspondent_map=corr_map,
-        tag_map=tag_map,
-        page=page,
-        total_count=total,
-        page_size=settings.opds_page_size,
-        include_content=settings.opds_include_content,
-        download_original=settings.download_original,
-    )
-    return Response(content=xml, media_type=ACQUISITION_TYPE)
+    self_href = f"{base}/opds/search?{urlencode({'query': query})}"
+    return await _render_acquisition(base, f"Search: {query}", self_href, docs, total, page)
 
 
 @app.get("/opds/opensearch.xml", dependencies=[Depends(verify_auth)])
