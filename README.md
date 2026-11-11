@@ -115,7 +115,7 @@ Set `THUMBNAIL_PREGENERATE=false` to disable startup pre-generation (images will
 
 When `DOCUMENT_CACHE_ENABLED=true` (default), the app loads the full document list into memory at startup and refreshes it every `DOCUMENT_CACHE_REFRESH_INTERVAL` seconds (default 600 / 10 minutes). This makes OPDS feed responses much faster since they don't need to query the Paperless API on every request.
 
-The cache refresh cycle also checks for missing thumbnails and generates them, combining both operations into a single background loop. When the cache is enabled, it replaces the standalone `THUMBNAIL_PREGENERATE` behavior.
+The cache refresh cycle also checks for missing thumbnails and generates them, combining both operations into a single background loop. When the cache is enabled, this check replaces the one-off startup pre-generation; `THUMBNAIL_PREGENERATE=false` turns it off as well, so images are only generated on first request.
 
 Search always queries the Paperless API directly (full-text search cannot be cached). If the cache is not yet ready (during initial startup), requests fall back to direct API calls.
 
