@@ -169,7 +169,7 @@ class ThumbnailCacheManager:
             logger.info("[thumbnails] Processing final batch (docs: %s)",
                          ", ".join(str(d) for d in batch_buffer))
             for doc_id in batch_buffer:
-                success = await self._generate_with_retry(doc_id)
+                success = await self.generate_with_retry(doc_id)
                 if success:
                     generated += 1
                     logger.info("[thumbnails] Generated images for doc %d (%d generated, %d failed, %d skipped)",
