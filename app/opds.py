@@ -64,7 +64,7 @@ def build_root_feed(
 ) -> str:
     """Build the root navigation feed.
 
-    extra_nav: list of (id, title, content, href) tuples for additional nav entries.
+    extra_nav: list of (id, title, content, href) tuples for additional navigation feed entries.
     """
     feed = ET.Element(f"{{{ATOM_NS}}}feed")
     _el(feed, "id", "urn:uuid:paperless-opds-root")
@@ -77,24 +77,24 @@ def build_root_feed(
     _el(feed, "link", rel="start", href=f"{base_url}/opds", type=NAVIGATION_TYPE)
     _el(feed, "link", rel="search", href=f"{base_url}/opds/opensearch.xml", type="application/opensearchdescription+xml")
 
-    nav_entries: list[tuple[str, str, str, str]] = [
-        ("urn:uuid:paperless-opds-all", "All Documents", "Browse all documents", f"{base_url}/opds/all"),
-        ("urn:uuid:paperless-opds-recent", "Recent Documents", "Recently added documents", f"{base_url}/opds/recent"),
-        ("urn:uuid:paperless-opds-tags", "By Tag", "Browse documents by tag", f"{base_url}/opds/tags"),
-        ("urn:uuid:paperless-opds-correspondents", "By Correspondent", "Browse documents by correspondent", f"{base_url}/opds/correspondents"),
-        ("urn:uuid:paperless-opds-doctypes", "By Document Type", "Browse documents by type", f"{base_url}/opds/document-types"),
+    nav_entries: list[tuple[str, str, str, str, str]] = [
+        ("urn:uuid:paperless-opds-all", "All Documents", "Browse all documents", f"{base_url}/opds/all", ACQUISITION_TYPE),
+        ("urn:uuid:paperless-opds-recent", "Recent Documents", "Recently added documents", f"{base_url}/opds/recent", ACQUISITION_TYPE),
+        ("urn:uuid:paperless-opds-tags", "By Tag", "Browse documents by tag", f"{base_url}/opds/tags", NAVIGATION_TYPE),
+        ("urn:uuid:paperless-opds-correspondents", "By Correspondent", "Browse documents by correspondent", f"{base_url}/opds/correspondents", NAVIGATION_TYPE),
+        ("urn:uuid:paperless-opds-doctypes", "By Document Type", "Browse documents by type", f"{base_url}/opds/document-types", NAVIGATION_TYPE),
     ]
     if extra_nav:
-        nav_entries.extend(extra_nav)
+        nav_entries.extend((*nav, NAVIGATION_TYPE) for nav in extra_nav)
 
     now = _now_iso()
-    for entry_id, entry_title, entry_content, href in nav_entries:
+    for entry_id, entry_title, entry_content, href, link_type in nav_entries:
         entry = _el(feed, "entry")
         _el(entry, "title", entry_title)
         _el(entry, "id", entry_id)
         _el(entry, "updated", now)
         _el(entry, "content", entry_content, type="text")
-        _el(entry, "link", rel="subsection", href=href, type=ACQUISITION_TYPE if "all" in href or "recent" in href else NAVIGATION_TYPE)
+        _el(entry, "link", rel="subsection", href=href, type=link_type)
 
     return _serialize(feed)
 
