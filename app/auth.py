@@ -9,8 +9,9 @@ security = HTTPBasic(auto_error=False)
 
 
 def _credentials_valid(credentials: HTTPBasicCredentials) -> bool:
-    username_ok = secrets.compare_digest(credentials.username, settings.opds_username or "")
-    password_ok = secrets.compare_digest(credentials.password, settings.opds_password or "")
+    # compare_digest raises TypeError on non-ASCII str, so compare UTF-8 bytes
+    username_ok = secrets.compare_digest(credentials.username.encode(), (settings.opds_username or "").encode())
+    password_ok = secrets.compare_digest(credentials.password.encode(), (settings.opds_password or "").encode())
     return username_ok and password_ok
 
 
