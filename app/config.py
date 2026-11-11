@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
     paperless_url: str = ""
     paperless_api_key: str = ""
     opds_title: str = "Paperless-OPDS"
-    opds_page_size: int = 25
+    opds_page_size: int = Field(default=25, ge=1)
     cache_ttl: int = 300
     opds_username: str | None = None
     opds_password: str | None = None
@@ -41,7 +42,7 @@ class Settings(BaseSettings):
     thumb_max_size: int = 300
     preview_max_size: int = 1000
     thumbnail_quality: int = 85
-    thumbnail_batch_size: int = 50
+    thumbnail_batch_size: int = Field(default=50, ge=1)
     thumbnail_max_retries: int = 3
     thumbnail_pregenerate: bool = True
 
