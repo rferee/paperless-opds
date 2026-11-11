@@ -160,12 +160,24 @@ class PaperlessClient:
         params = {"original": "true"} if original else {}
         req = self._client.build_request("GET", f"/api/documents/{doc_id}/download/", params=params)
         resp = await self._client.send(req, stream=True)
-        resp.raise_for_status()
+        if not resp.is_success:
+            # A streamed response holds its pooled connection until closed
+            await resp.aclose()
+            resp.raise_for_status()
         headers = {
             "content-type": resp.headers.get("content-type", "application/octet-stream"),
             "content-disposition": resp.headers.get("content-disposition", ""),
         }
-        return resp.aiter_bytes(chunk_size=65536), {k: v for k, v in headers.items() if v}
+
+        async def _iter_body() -> AsyncIterator[bytes]:
+            # Release the connection on completion, mid-stream errors and client disconnects
+            try:
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                    yield chunk
+            finally:
+                await resp.aclose()
+
+        return _iter_body(), {k: v for k, v in headers.items() if v}
 
     async def get_thumbnail(self, doc_id: int) -> tuple[bytes, dict]:
         """Get thumbnail bytes, cached for 10 minutes."""
