@@ -23,7 +23,6 @@ class PaperlessClient:
             timeout=30.0,
         )
         self._cache: TTLCache = TTLCache(maxsize=32, ttl=settings.cache_ttl)
-        self._thumb_cache: TTLCache = TTLCache(maxsize=512, ttl=600)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -179,29 +178,11 @@ class PaperlessClient:
 
         return _iter_body(), {k: v for k, v in headers.items() if v}
 
-    async def get_thumbnail(self, doc_id: int) -> tuple[bytes, dict]:
-        """Get thumbnail bytes, cached for 10 minutes."""
-        cached = self._thumb_cache.get(doc_id)
-        if cached is not None:
-            return cached
+    async def get_thumbnail(self, doc_id: int) -> bytes:
+        """Fetch the thumbnail image bytes."""
         resp = await self._client.get(f"/api/documents/{doc_id}/thumb/")
         resp.raise_for_status()
-        headers = {
-            "content-type": resp.headers.get("content-type", "image/png"),
-            "content-length": resp.headers.get("content-length", ""),
-        }
-        result = (resp.content, {k: v for k, v in headers.items() if v})
-        self._thumb_cache[doc_id] = result
-        return result
-
-    async def stream_preview(self, doc_id: int) -> tuple[AsyncIterator[bytes], dict]:
-        req = self._client.build_request("GET", f"/api/documents/{doc_id}/preview/")
-        resp = await self._client.send(req, stream=True)
-        resp.raise_for_status()
-        headers = {
-            "content-type": resp.headers.get("content-type", "application/pdf"),
-        }
-        return resp.aiter_bytes(chunk_size=65536), {k: v for k, v in headers.items() if v}
+        return resp.content
 
     async def get_preview_bytes(self, doc_id: int) -> bytes:
         """Fetch the full preview PDF as bytes (non-streaming)."""

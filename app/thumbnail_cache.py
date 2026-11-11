@@ -48,7 +48,7 @@ class ThumbnailCacheManager:
 
     async def generate_thumb(self, doc_id: int) -> Path:
         """Fetch thumbnail from Paperless and resize to a small JPEG."""
-        data, _ = await self._client.get_thumbnail(doc_id)
+        data = await self._client.get_thumbnail(doc_id)
         path = self.get_thumb_path(doc_id)
 
         def _process() -> None:
