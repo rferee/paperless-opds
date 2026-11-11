@@ -49,9 +49,30 @@ def _sync_done_callback(task: asyncio.Task) -> None:
         logger.error("Document cache sync failed: %s", exc, exc_info=exc)
 
 
+def _warn_about_auth_settings() -> None:
+    """Warn when Basic Auth is off, only half configured, or accepts empty credentials."""
+    username, password = settings.opds_username, settings.opds_password
+    if username is None and password is None:
+        logger.warning("Basic Auth is disabled (OPDS_USERNAME and OPDS_PASSWORD are unset): "
+                       "anyone who can reach this service can read and download every document")
+    elif username is None or password is None:
+        set_name, missing_name = (
+            ("OPDS_PASSWORD", "OPDS_USERNAME") if username is None else ("OPDS_USERNAME", "OPDS_PASSWORD")
+        )
+        logger.warning("%s is set but %s is missing, so Basic Auth is DISABLED: "
+                       "anyone who can reach this service can read and download every document",
+                       set_name, missing_name)
+    else:
+        empty = [name for name, value in (("OPDS_USERNAME", username), ("OPDS_PASSWORD", password)) if value == ""]
+        if empty:
+            logger.warning("Basic Auth is enabled with an empty %s: requests that send the empty value are accepted",
+                           " and ".join(empty))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global client, cache_manager, doc_cache_manager
+    _warn_about_auth_settings()
     client = PaperlessClient()
     cache_manager = ThumbnailCacheManager(client)
     sync_task = None
