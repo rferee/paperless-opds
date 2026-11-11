@@ -17,6 +17,8 @@ class ThumbnailCacheManager:
         self._client = client
         self._thumb_dir = Path(settings.thumbnail_dir) / "thumb"
         self._preview_dir = Path(settings.thumbnail_dir) / "preview"
+        # PyMuPDF is not thread-safe: render one preview at a time, and only once per document
+        self._preview_lock = asyncio.Lock()
 
     def get_thumb_path(self, doc_id: int) -> Path:
         return self._thumb_dir / f"{doc_id}.jpg"
@@ -48,24 +50,29 @@ class ThumbnailCacheManager:
 
     async def generate_preview(self, doc_id: int) -> Path:
         """Fetch preview PDF from Paperless and render first page as JPEG."""
-        pdf_bytes = await self._client.get_preview_bytes(doc_id)
         path = self.get_preview_path(doc_id)
+        async with self._preview_lock:
+            # Another task may have rendered it while this one waited for the lock
+            if self.has_preview(doc_id):
+                return path
 
-        def _process() -> None:
-            doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-            try:
-                page = doc[0]
-                # Calculate zoom so longest side = preview_max_size
-                max_dim = max(page.rect.width, page.rect.height)
-                zoom = settings.preview_max_size / max_dim if max_dim > 0 else 1.0
-                mat = pymupdf.Matrix(zoom, zoom)
-                pix = page.get_pixmap(matrix=mat)
-                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                img.save(path, "JPEG", quality=settings.thumbnail_quality)
-            finally:
-                doc.close()
+            pdf_bytes = await self._client.get_preview_bytes(doc_id)
 
-        await asyncio.to_thread(_process)
+            def _process() -> None:
+                doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+                try:
+                    page = doc[0]
+                    # Calculate zoom so longest side = preview_max_size
+                    max_dim = max(page.rect.width, page.rect.height)
+                    zoom = settings.preview_max_size / max_dim if max_dim > 0 else 1.0
+                    mat = pymupdf.Matrix(zoom, zoom)
+                    pix = page.get_pixmap(matrix=mat)
+                    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    img.save(path, "JPEG", quality=settings.thumbnail_quality)
+                finally:
+                    doc.close()
+
+            await asyncio.to_thread(_process)
         return path
 
     def prune(self, keep_ids: set[int]) -> int:
