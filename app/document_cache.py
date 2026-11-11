@@ -228,12 +228,9 @@ class DocumentCacheManager:
             batch = missing[i : i + batch_size]
             logger.info("[doc-cache] Processing thumbnail batch %d-%d of %d",
                         i + 1, min(i + batch_size, len(missing)), len(missing))
-            for doc_id in batch:
-                success = await self._thumbnail_manager.generate_with_retry(doc_id)
-                if success:
-                    generated += 1
-                else:
-                    failed += 1
+            batch_generated, batch_failed = await self._thumbnail_manager.generate_batch(batch)
+            generated += batch_generated
+            failed += batch_failed
 
         logger.info("[doc-cache] Thumbnail check complete: %d generated, %d failed, %d already cached",
                     generated, failed, len(doc_ids) - len(missing))

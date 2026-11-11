@@ -159,35 +159,33 @@ class ThumbnailCacheManager:
 
                 logger.info("[thumbnails] Processing batch (docs: %s)",
                              ", ".join(str(d) for d in batch))
-
-                for doc_id in batch:
-                    success = await self.generate_with_retry(doc_id)
-                    if success:
-                        generated += 1
-                        logger.info("[thumbnails] Generated images for doc %d (%d generated, %d failed, %d skipped)",
-                                     doc_id, generated, failed, skipped)
-                    else:
-                        failed += 1
-                        logger.warning("[thumbnails] Skipped doc %d after retries (%d generated, %d failed, %d skipped)",
-                                        doc_id, generated, failed, skipped)
+                batch_generated, batch_failed = await self.generate_batch(batch)
+                generated += batch_generated
+                failed += batch_failed
 
         # Process any remaining docs in the buffer
         if batch_buffer:
             logger.info("[thumbnails] Processing final batch (docs: %s)",
                          ", ".join(str(d) for d in batch_buffer))
-            for doc_id in batch_buffer:
-                success = await self.generate_with_retry(doc_id)
-                if success:
-                    generated += 1
-                    logger.info("[thumbnails] Generated images for doc %d (%d generated, %d failed, %d skipped)",
-                                 doc_id, generated, failed, skipped)
-                else:
-                    failed += 1
-                    logger.warning("[thumbnails] Skipped doc %d after retries (%d generated, %d failed, %d skipped)",
-                                    doc_id, generated, failed, skipped)
+            batch_generated, batch_failed = await self.generate_batch(batch_buffer)
+            generated += batch_generated
+            failed += batch_failed
 
         logger.info("[thumbnails] Pre-generation complete: %d total docs, %d already cached, %d generated, %d failed",
                      total_docs, skipped, generated, failed)
+
+    async def generate_batch(self, doc_ids: list[int]) -> tuple[int, int]:
+        """Generate the missing images of each document in turn. Returns (generated, failed)."""
+        generated = 0
+        failed = 0
+        for doc_id in doc_ids:
+            if await self.generate_with_retry(doc_id):
+                generated += 1
+                logger.info("[thumbnails] Generated images for doc %d", doc_id)
+            else:
+                failed += 1
+                logger.warning("[thumbnails] Skipped doc %d after retries", doc_id)
+        return generated, failed
 
     async def generate_with_retry(self, doc_id: int) -> bool:
         """Generate thumb and preview for a document with exponential backoff."""
