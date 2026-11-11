@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from cachetools import TTLCache
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
@@ -99,6 +100,33 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title=settings.opds_title, lifespan=lifespan)
+
+
+def _upstream_target(exc: httpx.HTTPError) -> str:
+    """Method and path of the failed Paperless request, without the host or any credentials in the URL."""
+    try:
+        return f"{exc.request.method} {exc.request.url.raw_path.decode('ascii', 'replace')}"
+    except RuntimeError:  # .request is not set
+        return "request"
+
+
+@app.exception_handler(httpx.HTTPStatusError)
+async def paperless_status_error_handler(request: Request, exc: httpx.HTTPStatusError) -> Response:
+    """Answer an error status from Paperless with 404 (if Paperless said 404) or 502 instead of a 500."""
+    status = exc.response.status_code
+    logger.warning("Paperless returned HTTP %d for %s", status, _upstream_target(exc))
+    if status == 404:
+        return Response(content="Not found", status_code=404)
+    return Response(content="Paperless request failed", status_code=502)
+
+
+@app.exception_handler(httpx.RequestError)
+async def paperless_request_error_handler(request: Request, exc: httpx.RequestError) -> Response:
+    """Answer a timeout (504) or connection error (502) talking to Paperless instead of a 500."""
+    logger.warning("Paperless %s failed: %s: %s", _upstream_target(exc), type(exc).__name__, exc)
+    if isinstance(exc, httpx.TimeoutException):
+        return Response(content="Paperless request timed out", status_code=504)
+    return Response(content="Paperless request failed", status_code=502)
 
 
 @app.middleware("http")
