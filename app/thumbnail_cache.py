@@ -68,6 +68,17 @@ class ThumbnailCacheManager:
         await asyncio.to_thread(_process)
         return path
 
+    def prune(self, keep_ids: set[int]) -> int:
+        """Delete cached thumbs/previews of documents not in keep_ids. Returns the number of files removed."""
+        removed = 0
+        for directory in (self._thumb_dir, self._preview_dir):
+            for path in directory.glob("*.jpg"):
+                stem = path.stem
+                if stem.isascii() and stem.isdigit() and int(stem) not in keep_ids:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+        return removed
+
     async def ensure_thumb(self, doc_id: int) -> Path:
         if self.has_thumb(doc_id):
             return self.get_thumb_path(doc_id)

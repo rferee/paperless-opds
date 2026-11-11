@@ -149,6 +149,15 @@ class DocumentCacheManager:
         self._documents = new_docs
         logger.info("[doc-cache] Cache updated: %d documents", len(new_docs))
 
+        # Drop cached images of documents that no longer exist in Paperless
+        try:
+            pruned = await asyncio.to_thread(self._thumbnail_manager.prune, new_ids)
+        except OSError:
+            logger.exception("[doc-cache] Failed to prune cached images of removed documents")
+        else:
+            if pruned:
+                logger.info("[doc-cache] Removed %d cached image(s) of deleted documents", pruned)
+
         # Clear response cache so stale XML is not served
         self._response_cache.clear()
 
