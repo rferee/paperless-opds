@@ -146,7 +146,8 @@ async def response_cache_middleware(request: Request, call_next):
             body = b""
             async for chunk in response.body_iterator:
                 body += chunk if isinstance(chunk, bytes) else chunk.encode()
-            media_type = response.media_type or "application/xml"
+            # call_next's response carries its type only in its headers (media_type is None)
+            media_type = response.headers.get("content-type", "application/xml")
             _response_cache[key] = (body, media_type)
             return Response(content=body, media_type=media_type)
         return response
