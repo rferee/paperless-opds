@@ -182,12 +182,14 @@ class DocumentCacheManager:
             self._ready.set()
             logger.info("[doc-cache] Initial cache ready")
 
-        # Check for missing thumbnails in the background, so a long backfill never delays the next refresh
-        if self._thumb_task is not None and not self._thumb_task.done():
-            logger.info("[doc-cache] Previous thumbnail check still running, not starting another")
-        else:
-            self._thumb_task = asyncio.create_task(self._check_thumbnails(list(new_ids)))
-            self._thumb_task.add_done_callback(_thumb_check_done_callback)
+        # Check for missing thumbnails in the background, so a long backfill never delays the next refresh.
+        # THUMBNAIL_PREGENERATE=false leaves images to be generated on first request, as without the cache.
+        if settings.thumbnail_pregenerate:
+            if self._thumb_task is not None and not self._thumb_task.done():
+                logger.info("[doc-cache] Previous thumbnail check still running, not starting another")
+            else:
+                self._thumb_task = asyncio.create_task(self._check_thumbnails(list(new_ids)))
+                self._thumb_task.add_done_callback(_thumb_check_done_callback)
 
     async def _fetch_all_documents(self) -> dict[int, PaperlessDocument]:
         docs: dict[int, PaperlessDocument] = {}
